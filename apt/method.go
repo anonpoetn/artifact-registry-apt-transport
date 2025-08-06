@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//  Modified to call a script to get a token
-
 package apt
 
 import (
@@ -26,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -69,7 +68,9 @@ type Method struct {
 }
 
 type aptMethodConfig struct {
-	serviceAccountJSON, serviceAccountEmail string
+	serviceAccountJSON, 
+	serviceAccountEmail, 
+	script 																	string
 	debug                                   bool
 }
 
@@ -102,6 +103,23 @@ func (m *Method) Run(ctx context.Context) error {
 	}
 }
 
+type externalTokenSource struct{
+	script string
+}
+
+func (ets externalTokenSource) Token() (*oauth2.Token, error){
+	cmd := exec.Command(ets.script)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	token := &oauth2.Token{
+		AccessToken: string(output),
+		TokenType: "Bearer",
+	}
+	return token, nil
+}
+
 func (m *Method) initClient(ctx context.Context) error {
 	if m.client != nil {
 		return nil
@@ -109,6 +127,8 @@ func (m *Method) initClient(ctx context.Context) error {
 
 	var ts oauth2.TokenSource
 	switch {
+	case m.config.script != "":
+		ts = externalTokenSource{m.config.script}
 	case m.config.serviceAccountJSON != "":
 		json, err := os.ReadFile(m.config.serviceAccountJSON)
 		if err != nil {
@@ -263,6 +283,8 @@ func (m *Method) handleConfigure(msg *Message) {
 			return
 		}
 		switch parts[0] {
+		case "Acquire::gar::Script":
+			m.config.script = strings.TrimSpace(parts[1])
 		case "Acquire::gar::Service-Account-JSON":
 			m.config.serviceAccountJSON = strings.TrimSpace(parts[1])
 		case "Acquire::gar::Service-Account-Email":

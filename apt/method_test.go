@@ -328,3 +328,50 @@ func TestAptMethodRunFail(t *testing.T) {
 		}
 	}
 }
+
+
+func TestAptMethodRunScript(t *testing.T) {
+
+	stdinreader, stdinwriter := io.Pipe()
+	stdoutreader, stdoutwriter := io.Pipe()
+	workMethod := NewAptMethod(bufio.NewReader(stdinreader), stdoutwriter)
+	workMethod.config.script = "./token.py"
+
+	ctx := context.Background()
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go workMethod.Run(ctx2)
+
+
+	reader := MessageReader{reader: bufio.NewReader(stdoutreader)}
+	msg, err := reader.ReadMessage(ctx)
+	if err != nil {
+		t.Fatalf("failed, %v", err)
+	}
+	if msg.code != 100 || msg.description != "Capabilities" {
+		t.Errorf("failed, didn't receive capabilities message")
+	}
+
+	writer := MessageWriter{writer: stdinwriter}
+	writer.WriteMessage(Message{
+		code:        600,
+		description: "URI Acquire",
+		fields:      map[string][]string{"URI": {"http://fake.uri"}, "Filename": {"/path/to/file"}},
+	})
+
+	msg, err = reader.ReadMessage(ctx)
+	if err != nil {
+		t.Fatalf("failed, %v", err)
+	}
+	if msg.code != 400 || msg.description != "URI Failure" ||
+		msg.Get("URI") != "http://fake.uri" || msg.Get("Message") == "" {
+		t.Errorf("failed, didn't receive uri failure message. msg is %q", msg)
+	}
+	cancel()
+
+	for _, p := range []io.Closer{stdinreader, stdinwriter, stdoutreader, stdoutwriter} {
+		if err := p.Close(); err != nil {
+			t.Errorf("Error from %v: %v", p, err)
+		}
+	}
+}
